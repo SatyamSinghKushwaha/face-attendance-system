@@ -147,7 +147,7 @@ class App:
             self.label_total_missed.config(text=f"Total Missed: {missed}s")
 
             # Repeat every 2 seconds
-            self.update_timers_job = self.main_window.after(2000, update)
+            self.update_timers_job = self.main_window.after(5000, update)
 
         update()
 

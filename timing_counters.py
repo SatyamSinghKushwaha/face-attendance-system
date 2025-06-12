@@ -17,7 +17,7 @@ def update_attendance(user_id, is_present):
     elapsedTime = currentTime - userTimers[user_id]['lastUpdateTime']
 
     # Only update every 2 seconds
-    if elapsedTime >= 2:
+    if elapsedTime >= 5:
         timers = userTimers[user_id]
 
         if is_present:
@@ -25,12 +25,12 @@ def update_attendance(user_id, is_present):
             if 0 < timers['absentCounter'] < 30:
                 timers['presentCounter'] += timers['absentCounter']
             # Add the current 2 seconds of presence
-            timers['presentCounter'] += 2
+            timers['presentCounter'] += 5
             # Reset absence counter
             timers['absentCounter'] = 0
         else:
             # Accumulate absence
-            timers['absentCounter'] += 2
+            timers['absentCounter'] += 5
             # If absence reaches 30s, count it as missed time
             if timers['absentCounter'] >= 30:
                 timers['absentTimeCounter'] += 30
