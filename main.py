@@ -64,6 +64,7 @@ class App:
         self.log_path = './log.txt'
         self.current_user = None
         self.update_timers_job = None
+        self.logged_in_emp_ids = set()
 
     def add_webcam(self, label):
         self.cap = cv2.VideoCapture(0)
@@ -107,6 +108,7 @@ class App:
                 with open(self.log_path, 'a') as f:
                     f.write(f'{name},{emp_id},{datetime.datetime.now()},in\n')
                 self.current_user = name
+                self.logged_in_emp_ids.add(emp_id)
                 self.run_timer_updates()
 
         threading.Thread(target=login_task).start()
