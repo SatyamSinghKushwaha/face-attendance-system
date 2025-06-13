@@ -16,7 +16,7 @@ def update_attendance(user_id, is_present):
     currentTime = time.time()
     elapsedTime = currentTime - userTimers[user_id]['lastUpdateTime']
 
-    # Only update every 2 seconds
+    # Only update every 5 seconds
     if elapsedTime >= 5:
         timers = userTimers[user_id]
 
