@@ -24,7 +24,7 @@ def update_attendance(user_id, is_present):
             # If user was absent for < 30s, add that back to present time
             if 0 < timers['absentCounter'] < 30:
                 timers['presentCounter'] += timers['absentCounter']
-            # Add the current 2 seconds of presence
+            # Add the current 5 seconds of presence
             timers['presentCounter'] += 5
             # Reset absence counter
             timers['absentCounter'] = 0
