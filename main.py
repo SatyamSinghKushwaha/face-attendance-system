@@ -6,6 +6,9 @@ import cv2
 from PIL import Image, ImageTk
 import face_recognition
 import threading
+import time
+import numpy as np
+import pickle
 
 from timing_counters import update_attendance, get_user_timer_data
 import util
@@ -54,7 +57,8 @@ class App:
 
         self.db_dir = "face_db"
         os.makedirs(self.db_dir, exist_ok=True)
-        self.known_encodings, self.known_names = util.load_known_faces(self.db_dir)
+        self.known_encodings, self.known_names, self.multi_encodings_dict = util.load_known_faces(self.db_dir)
+
 
         self.users_file_path = os.path.join(self.db_dir, 'users.json')
         if not os.path.exists(self.users_file_path) or os.path.getsize(self.users_file_path) == 0:
@@ -112,6 +116,22 @@ class App:
                 self.run_timer_updates()
 
         threading.Thread(target=login_task).start()
+
+    def update_register_video_feed(self):
+        if not self.running_register_feed:
+            return
+
+        ret, frame = self.cap.read()
+        if ret:
+            self.register_frame = frame.copy()
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(frame_rgb)
+            imgtk = ImageTk.PhotoImage(image=pil_img)
+            self.capture_label.imgtk = imgtk
+            self.capture_label.configure(image=imgtk)
+
+        # Repeat every 50ms
+        self.register_new_user_window.after(50, self.update_register_video_feed)
 
     def logout(self):
         def logout_task():
@@ -180,8 +200,7 @@ class App:
                 status, emp_id_detected = util.recognize(
                     self.most_recent_capture_arr,
                     self.db_dir,
-                    self.known_encodings,
-                    self.known_names
+                    use_multi_encodings=True  # New flag
                 )
 
                 is_present = (status == self.current_user)
@@ -252,16 +271,41 @@ class App:
     def register_new_user(self):
         self.register_new_user_window = tk.Toplevel(self.main_window)
 
+
         # Position slightly right of main window
         reg_x = self.x_pos + 40  # or any offset you like
         reg_y = self.y_pos + 20
         self.register_new_user_window.geometry(f"1200x520+{reg_x}+{reg_y}")
 
         self.register_new_user_window.title("Register New User")
+        # Instruction Label
+        instruction_text = (
+            "📸 Move your face as instructed while we capture:\n"
+            "1. Look straight (5 frames)\n"
+            "2. Slowly turn left (5 frames)\n"
+            "3. Slowly turn right (5 frames)\n"
+            "4. Look slightly up/down (5 frames)\n"
+            "5. Smile / neutral (10 frames)\n"
+            "⚠️ Ensure good lighting and only one face is visible"
+        )
+        util.get_text_label(self.register_new_user_window, instruction_text).grid(row=2, column=0, columnspan=2,
+                                                                                  pady=10)
+        instruction_label = tk.Label(
+            self.register_new_user_window,
+            text=instruction_text,
+            font=("Helvetica", 13),
+            fg="blue",
+            justify="left",
+            wraplength=400,
+            padx=10,
+            pady=10
+        )
+        instruction_label.place(x=720, y=350)  # Adjust as needed
 
         self.capture_label = util.get_img_label(self.register_new_user_window)
         self.capture_label.place(x=10, y=0, width=700, height=500)
-        self.add_img_to_label(self.capture_label)
+        self.running_register_feed = True
+        self.update_register_video_feed()
 
         x_label = 750
         x_entry = 900
@@ -291,6 +335,8 @@ class App:
         self.try_again_button_register_new_user_window.place(x=850, y=300)
 
     def try_again_register_new_user(self):
+        self.register_new_user_window.destroy()
+        self.running_register_feed = False
         self.register_new_user_window.destroy()
 
     def add_img_to_label(self, label):
@@ -324,19 +370,94 @@ class App:
             util.msg_box("Error", f"Emp ID '{emp_id}' is already registered!")
             return
 
-        img_path = os.path.join(self.db_dir, f'{name}.jpg')
-        cv2.imwrite(img_path, self.register_new_user_capture)
+        # Create directory for this user
+        user_dir = os.path.join(self.db_dir, name)
+        os.makedirs(user_dir, exist_ok=True)
+
+        self.capture_count = 0
+        self.total_captures = 30
+        self.capture_user_dir = user_dir
+
+        # Label for progress
+        self.label_capture_status = tk.Label(self.register_new_user_window, text="Capturing images...",
+                                             font=("Helvetica", 12), fg="green")
+        self.label_capture_status.place(x=850, y=250)
+
+        # Start threaded capture
+        threading.Thread(target=self.capture_images_for_registration, args=(name, emp_id)).start()
+
+    def capture_images_for_registration(self, name, emp_id):
+        saved = 0
+        max_count = self.total_captures
+        while saved < max_count:
+            ret, frame = self.cap.read()
+            if not ret:
+                continue
+
+            # Detect face
+            face_locations = face_recognition.face_locations(frame)
+            if len(face_locations) != 1:
+                self.register_new_user_window.after(0, lambda:
+                self.label_capture_status.config(text="Ensure only one face is visible")
+                                                    )
+                time.sleep(0.5)
+                continue
+
+            img_path = os.path.join(self.capture_user_dir, f'{saved}.jpg')
+            cv2.imwrite(img_path, frame)
+            saved += 1
+
+            self.register_new_user_window.after(0, lambda count=saved:
+            self.label_capture_status.config(text=f"Capturing image {count}/{max_count}")
+                                                )
+            time.sleep(0.6)
+
+        # Save user data
+        users_file = self.users_file_path
+        if os.path.exists(users_file):
+            with open(users_file, 'r') as f:
+                try:
+                    users_data = json.load(f)
+                except:
+                    users_data = {}
+        else:
+            users_data = {}
 
         users_data[name] = emp_id
         with open(users_file, 'w') as f:
             json.dump(users_data, f, indent=4)
 
-        # ✅ Refresh known encodings from face_db after registering new user
-        self.known_encodings, self.known_names = util.load_known_faces(self.db_dir)
+        # Compute average encoding from all valid face encodings
+        encodings = []
+        for i in range(self.total_captures):
+            img_path = os.path.join(self.capture_user_dir, f'{i}.jpg')
+            img = cv2.imread(img_path)
+            if img is None:
+                continue
+            face_encs = face_recognition.face_encodings(img)
+            if face_encs:
+                encodings.append(face_encs[0])
 
-        util.msg_box('Success!', f'User {name} with ID {emp_id} registered successfully!')
+        if encodings:
+            avg_encoding = np.mean(encodings, axis=0)
+            enc_path = os.path.join(self.capture_user_dir, 'avg_encoding.pkl')
+            with open(enc_path, 'wb') as f:
+                pickle.dump(avg_encoding, f)
 
-        self.register_new_user_window.destroy()
+        # Save all encodings as multi_encodings.pkl
+        multi_path = os.path.join(self.capture_user_dir, 'multi_encodings.pkl')
+        with open(multi_path, 'wb') as f:
+            pickle.dump(encodings, f)
+
+        # Reload known encodings
+        self.known_encodings, self.known_names, self.multi_encodings_dict = util.load_known_faces(self.db_dir)
+
+        # Notify and close
+        self.register_new_user_window.after(0, lambda: util.msg_box(
+            'Success!', f'User {name} with ID {emp_id} registered successfully!'
+        ))
+        self.register_new_user_window.after(0, self.register_new_user_window.destroy)
+        self.running_register_feed = False
 
     def start(self):
         self.main_window.protocol("WM_DELETE_WINDOW", self.on_closing)
